@@ -1,0 +1,66 @@
+archetype nft(admin : address)
+
+asset ledger {
+  id    : nat;
+  owner : address;
+  uri : string;
+  creator : address;
+  royalties : rational;
+  nbtransfers : nat = 0;
+}
+
+asset allowance identified by  addr_owner addr_spender {
+  addr_owner       : address;
+  addr_spender     : address;
+}
+
+entry %transfer (%from : address, %to : address, tid : nat) {
+  require {
+    r0: ledger[tid].owner = %from
+  }
+  effect {
+    if caller <> %from then begin
+      dorequire (allowance.contains((%from, caller)), "CALLER NOT ALLOWED");
+      allowance.remove(((%from, caller)))
+    end;
+    ledger.update(tid, { owner = %to; nbtransfers += 1 });
+  }
+}
+
+entry approve (spender : address, tid: nat) {
+  sourced by ledger[tid].owner
+  failif {
+    r1 with "UNSAFE ALLOWANCE" : allowance.contains((source, spender));
+  }
+  effect {
+    allowance.addupdate((source, spender), {})
+  }
+}
+
+entry mint (tid : nat, o : address, u : string, c : address, r : rational) {
+  called by admin
+  effect {
+    ledger.add({ id = tid; owner = o; uri = u; creator = c; royalties = r})
+  }
+}
+
+entry increase () {
+  called by admin
+  effect {
+    for t in ledger.select(the.nbtransfers >= 10) do
+      ledger.update(t, { royalties *= 1.1 })
+    done
+  }
+}
+
+entry rm () {
+  called by admin
+  effect {
+    ledger.removeif(the.nbtransfers >= 20)
+  }
+}
+
+getter getOwner (tid : nat) : address {
+  return ledger[tid].owner
+}
+

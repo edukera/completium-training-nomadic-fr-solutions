@@ -1,0 +1,67 @@
+archetype auction(owner : address, tokenid : nat, nft: address)
+
+variable bestbidder : option<address> = none
+variable bestbid    : tez = 0tz
+
+variable endofbid   : date = now
+
+states =
+| Transferred initial
+| ForSale
+
+variable forsale : bool = false
+
+entry checkowner(token_owner : address) {
+  called by nft
+  require {
+    r1 otherwise "CALLER NOT OWNER": source = token_owner
+  }
+}
+
+transition upforsale (price : tez) {
+  called by owner
+  from Transferred to ForSale
+  with effect {
+    bestbid := price;
+    endofbid := now + 3m;
+    transfer 0tz to nft call getOwner<nat * contract<address>>((tokenid, self.checkowner));
+    transfer 0tz to nft call approve<address * nat>((selfaddress, tokenid))
+  }
+}
+
+entry bid() {
+  state is ForSale
+  require {
+    r3: now < endofbid;
+    r5: transferred > bestbid;
+  }
+  effect {
+    match bestbidder with
+    | some best ->
+      transfer bestbid to best
+    | none -> ()
+    end;
+    bestbidder := some(caller);
+    bestbid := transferred;
+    if endofbid - now < 2m then
+     endofbid += 2m;
+  }
+}
+
+transition claim () {
+  require {
+    r6 otherwise "Bid Period Is Still On": now > endofbid;
+  }
+  from ForSale to Transferred
+  with effect {
+    match bestbidder with
+    | some best -> begin
+      transfer balance to owner;
+      transfer 0tz to nft call %transfer<address * address * nat>((owner, best, tokenid))
+      end
+    | none -> ()
+    end;
+    forsale := false;
+  }
+}
+
